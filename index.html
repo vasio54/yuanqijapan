@@ -164,6 +164,7 @@
         const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
         let isMatching = false;
         let cancelButton = null;
+        let redirectTimeout = null; // 用於儲存跳轉定時器
 
         function startChat() {
             const targetGender = genderSelect.value;
@@ -204,6 +205,12 @@
             setTimeout(() => {
                 statusDiv.textContent = ''; // ステータスメッセージをクリア
             }, 1000);
+
+            // 清除可能的跳轉定時器
+            if (redirectTimeout) {
+                clearTimeout(redirectTimeout);
+                redirectTimeout = null;
+            }
         }
 
         socket.on('waiting', (msg) => {
@@ -216,6 +223,12 @@
             isMatching = false;
             if (cancelButton) cancelButton.classList.add('hidden'); // キャンセルボタンを非表示
             window.location.href = '/chat.html';
+
+            // 清除可能的跳轉定時器
+            if (redirectTimeout) {
+                clearTimeout(redirectTimeout);
+                redirectTimeout = null;
+            }
         });
 
         socket.on('error', (msg) => {
@@ -226,6 +239,12 @@
             sessionStorage.clear();
             selectionArea.classList.remove('hidden');
             if (cancelButton) cancelButton.classList.add('hidden');
+
+            // 清除可能的跳轉定時器
+            if (redirectTimeout) {
+                clearTimeout(redirectTimeout);
+                redirectTimeout = null;
+            }
         });
 
         socket.on('reconnect', (attemptNumber) => {
@@ -244,21 +263,45 @@
             sessionStorage.clear();
             selectionArea.classList.remove('hidden');
             if (cancelButton) cancelButton.classList.add('hidden');
+
+            // 清除可能的跳轉定時器
+            if (redirectTimeout) {
+                clearTimeout(redirectTimeout);
+                redirectTimeout = null;
+            }
         });
 
         if (isMobile) {
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden && isMatching) {
+                    // 頁面不可見，且正在配對中
                     socket.emit('stopMatching');
-                    statusDiv.textContent = 'マッチングがキャンセルされました';
-                    startButton.disabled = false;
-                    isMatching = false;
-                    sessionStorage.clear();
-                    selectionArea.classList.remove('hidden');
-                    if (cancelButton) cancelButton.classList.add('hidden');
-                    setTimeout(() => {
-                        window.location.href = '/index.html';
-                    }, 1000);
+                    statusDiv.textContent = 'マッチングが一時停止しました。ページに戻って続けてください...';
+
+                    // 設定 30 秒後跳轉，若使用者未返回
+                    redirectTimeout = setTimeout(() => {
+                        if (document.hidden) { // 確認使用者仍未返回
+                            statusDiv.textContent = 'マッチングがキャンセルされました';
+                            startButton.disabled = false;
+                            isMatching = false;
+                            sessionStorage.clear();
+                            selectionArea.classList.remove('hidden');
+                            if (cancelButton) cancelButton.classList.add('hidden');
+                            window.location.href = '/index.html';
+                        }
+                    }, 120000); // 30 秒後跳轉
+                } else if (!document.hidden && isMatching) {
+                    // 使用者返回頁面，且正在配對中
+                    if (redirectTimeout) {
+                        clearTimeout(redirectTimeout); // 取消跳轉
+                        redirectTimeout = null;
+                    }
+                    // 恢復配對
+                    const targetGender = sessionStorage.getItem('targetGender');
+                    if (targetGender) {
+                        socket.emit('startMatching', { targetGender });
+                        statusDiv.textContent = 'マッチング中...';
+                    }
                 }
             });
         }
